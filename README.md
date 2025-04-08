@@ -1,6 +1,6 @@
 # 🏡 Plataforma de Reservas de Propiedades
 
-Este proyecto es una plataforma web tipo Airbnb desarrollada con HTML, CSS y Python (Flask), que permite a los usuarios explorar propiedades en alquiler, ver detalles, realizar reservas y dejar retroalimentación.
+Este proyecto es una plataforma web tipo Airbnb desarrollada con HTML, CSS y Python (Fastapi), que permite a los usuarios explorar propiedades en alquiler, ver detalles, realizar reservas y dejar retroalimentación.
 
 ## 📁 Estructura del Proyecto
 
@@ -27,19 +27,19 @@ Este proyecto es una plataforma web tipo Airbnb desarrollada con HTML, CSS y Pyt
 ## 🛠️ Tecnologías Usadas
 
 - **Frontend**: HTML5, CSS3
-- **Backend**: Python 3 (Flask)
+- **Backend**: Python 3 (Fastapi)
 - **Otros**: Google Maps (para ubicaciones)
 
 ## ▶️ Cómo Ejecutarlo
 
 1. Instala Flask:
    ```bash
-   pip install flask
+   pip install fastapi
    ```
 
 2. Ejecuta el servidor:
    ```bash
-   python main.py
+   python -m uvicorn main:app --reload
    ```
 
 3. Abre el navegador y ve a:
@@ -49,9 +49,6 @@ Este proyecto es una plataforma web tipo Airbnb desarrollada con HTML, CSS y Pyt
 
 ## 📌 Pendientes o Mejoras Futuras
 
-- Conexión a base de datos real para guardar reservas.
-- Autenticación de usuarios.
-- Validación de formularios.
 - Integración con servicios de pago.
 
 ## 📷 Vista previa
