@@ -1,6 +1,6 @@
 # 🏡 Plataforma de Reservas de Propiedades
 
-Este proyecto es una plataforma web tipo Airbnb desarrollada con HTML, CSS y Python (Fastapi), que permite a los usuarios explorar propiedades en alquiler, ver detalles, realizar reservas y dejar retroalimentación.
+Este proyecto es una plataforma web tipo Airbnb desarrollada con **HTML**, **CSS**, **FastAPI** y **Supabase**, que permite a los usuarios explorar propiedades en alquiler, ver detalles, realizar reservas con validación, y dejar retroalimentación para futuros usuarios.
 
 ## 📁 Estructura del Proyecto
 
@@ -12,45 +12,54 @@ Este proyecto es una plataforma web tipo Airbnb desarrollada con HTML, CSS y Pyt
 ├── Mis-reservas.html     # Historial de reservas del usuario
 ├── feedback.html         # Sección para comentarios y retroalimentación
 ├── styles.css            # Estilos personalizados
-├── main.py               # Backend con Flask (gestión de rutas y lógica)
+├── main.py               # Backend con FastAPI (gestión de lógica del sistema)
 ```
 
 ## 🚀 Características Principales
 
 - 🎯 **Explorar Propiedades**: Visualiza propiedades con imagen, precio y ubicación.
-- 📍 **Detalles Ampliados**: Muestra imágenes grandes, mapas y características de la propiedad.
-- 📆 **Reservas en Línea**: Completa una reserva con formulario y simula pago.
-- 💬 **Retroalimentación**: Sección para comentarios de los usuarios.
-- 🔐 **Gestión de Reservas**: Historial de reservas personales (Mis-reservas).
-- 🎨 **Diseño Responsivo**: Visual atractivo con estilos modernos y adaptados.
+- 📍 **Detalles Ampliados**: Imágenes grandes, mapa embebido y más información.
+- ✅ **Validación de Usuarios**: Inicio de sesión, registro y autenticación con Supabase.
+- 📆 **Reservas Inteligentes**: Guarda y bloquea fechas ya reservadas.
+- 💬 **Retroalimentación**: Usuarios pueden dejar comentarios útiles sobre los alojamientos.
+- 🔐 **Gestión de Reservas**: Visualización y cancelación desde “Mis reservas”.
+- ☁️ **Base de Datos en la Nube**: Usando Supabase para guardar usuarios, reservas y feedbacks.
+- 🔄 **Actualización Asíncrona**: Background tasks y respuestas rápidas vía FastAPI.
 
 ## 🛠️ Tecnologías Usadas
 
 - **Frontend**: HTML5, CSS3
-- **Backend**: Python 3 (Fastapi)
-- **Otros**: Google Maps (para ubicaciones)
+- **Backend**: [FastAPI](https://fastapi.tiangolo.com/)
+- **Base de Datos**: [Supabase](https://supabase.com/) (PostgreSQL + Auth + Storage)
+- **Autenticación**: Supabase Auth
+- **Entorno**: Python 3.11+, dotenv, Pydantic
 
 ## ▶️ Cómo Ejecutarlo
 
-1. Instala Flask:
+1. Instala las dependencias:
    ```bash
-   pip install fastapi
+   pip install fastapi "uvicorn[standard]" python-dotenv supabase
    ```
 
-2. Ejecuta el servidor:
+2. Configura tus variables de entorno en un archivo `.env`:
+   ```env
+   SUPABASE_URL=https://tuproyecto.supabase.co
+   SUPABASE_KEY=tu_clave_secreta
+   ```
+
+3. Ejecuta el servidor:
    ```bash
-   python -m uvicorn main:app --reload
+   uvicorn main:app --reload
    ```
 
-3. Abre el navegador y ve a:
+4. Abre el navegador en:
    ```
-   http://localhost:5000
+   http://localhost:8000
    ```
 
-## 📌 Pendientes o Mejoras Futuras
+## 📌 Mejoras Futuras
 
-- Integración con servicios de pago.
-
-## 📷 Vista previa
-
-Se puede incluir una o varias capturas de pantalla aquí (opcional si vas a subirlo a GitHub).
+- Sistema de puntuación y calificaciones.
+- Búsqueda y filtrado avanzado de propiedades.
+- Panel administrativo para propietarios.
+- Notificaciones por correo o SMS.
