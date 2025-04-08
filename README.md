@@ -21,8 +21,8 @@ Este proyecto es una plataforma web tipo Airbnb desarrollada con **HTML**, **CSS
 - 📍 **Detalles Ampliados**: Imágenes grandes, mapa embebido y más información.
 - ✅ **Validación de Usuarios**: Inicio de sesión, registro y autenticación con Supabase.
 - 📆 **Reservas Inteligentes**: Guarda y bloquea fechas ya reservadas.
-- 💬 **Retroalimentación**: Usuarios pueden dejar comentarios útiles sobre los alojamientos.
-- 🔐 **Gestión de Reservas**: Visualización y cancelación desde “Mis reservas”.
+- 💬 **Retroalimentación**: Usuarios pueden dejar comentarios útiles sobre los alojamientos y calificaciones.
+- 🔐 **Gestión de Reservas**: Visualización desde “Mis reservas”.
 - ☁️ **Base de Datos en la Nube**: Usando Supabase para guardar usuarios, reservas y feedbacks.
 - 🔄 **Actualización Asíncrona**: Background tasks y respuestas rápidas vía FastAPI.
 
@@ -59,7 +59,6 @@ Este proyecto es una plataforma web tipo Airbnb desarrollada con **HTML**, **CSS
 
 ## 📌 Mejoras Futuras
 
-- Sistema de puntuación y calificaciones.
 - Búsqueda y filtrado avanzado de propiedades.
 - Panel administrativo para propietarios.
 - Notificaciones por correo o SMS.
