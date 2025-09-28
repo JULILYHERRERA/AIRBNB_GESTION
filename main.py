@@ -12,8 +12,8 @@ from datetime import datetime, timedelta
 
 load_dotenv()
 app = FastAPI()
-app.mount("/estilos", StaticFiles(directory="estilos"), name="estilos")
-app.mount("/paginas", StaticFiles(directory="paginas"), name="paginas")
+app.mount("/estilos", StaticFiles(directory="frontend"), name="estilos")
+app.mount("/frontend", StaticFiles(directory="frontend"), name="frontend")
 
 app.add_middleware(
     CORSMiddleware,
@@ -50,7 +50,7 @@ class ReservationRequest(BaseModel):
 
 @app.get("/")
 def home():
-    return FileResponse("paginas/page.html")
+    return FileResponse("frontend/index.html")
 
 @app.post("/register")
 async def register(user: RegisterRequest):

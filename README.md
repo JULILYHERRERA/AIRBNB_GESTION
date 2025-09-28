@@ -33,9 +33,10 @@ Este proyecto es una plataforma web tipo Airbnb desarrollada con **HTML**, **CSS
 - **Base de Datos**: [Supabase](https://supabase.com/) (PostgreSQL + Auth + Storage)
 - **Autenticación**: Supabase Auth
 - **Entorno**: Python 3.11+, dotenv, Pydantic
+- **Servidor estático (Docker)**: nginx:alpine (por ahora solo FRONTEND)
+
 
 ## ▶️ Cómo Ejecutarlo
-
 1. Instala las dependencias:
    ```bash
    pip install fastapi "uvicorn[standard]" python-dotenv supabase
@@ -62,3 +63,37 @@ Este proyecto es una plataforma web tipo Airbnb desarrollada con **HTML**, **CSS
 - Búsqueda y filtrado avanzado de propiedades.
 - Panel administrativo para propietarios.
 - Notificaciones por correo o SMS.
+
+
+## frontend con Docker (Nginx)
+
+**Requisitos**
+-Docker Desktop (Windows/Mac) o Docker Engine (Linux)
+
+1-Construir la imagen
+
+Ubícate en la carpeta raíz del repo (donde existe la carpeta frontend/) y ejecuta:
+
+   ```bash
+   cd frontend
+   docker build -t airbnb-frontend .
+   ```
+
+2-Ejecutar el contenedor
+
+   ```bash
+   docker run -d --name airbnb-frontend -p 8080:80 airbnb-frontend
+   ```
+
+4. Abre el navegador en:
+   ```
+   http://localhost:8080
+   ```
+
+**Actualizar imagen tras cambios**
+
+   ```bash
+   docker rm -f airbnb-frontend
+   docker build -t airbnb-frontend ./frontend
+   docker run -d --name airbnb-frontend -p 8080:80 airbnb-frontend
+   ```

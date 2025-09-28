@@ -1,0 +1,12 @@
+# entornos / caches
+.venv/
+__pycache__/
+*.pyc
+
+# credenciales
+.env
+
+# otros
+dist/
+build/
+.DS_Store
