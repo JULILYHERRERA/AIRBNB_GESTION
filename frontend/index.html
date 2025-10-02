@@ -8,8 +8,6 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <link rel="stylesheet" href="/estilos/styles.css">
   <link rel="icon" href="https://cdn-icons-png.flaticon.com/512/2111/2111320.png" type="image/jpeg">
-  <link rel="stylesheet" href="/frontend/style.css"> 
-En ambos casos, FastAPI sabrá que debe buscar el archivo `style.css` dentro de la carpeta `frontend`.
 </head>
 
 <body class="bg-gray-100">
@@ -109,6 +107,7 @@ En ambos casos, FastAPI sabrá que debe buscar el archivo `style.css` dentro de 
     <p>&copy; 2025 AIRBNB JH-LS. Todos los derechos reservados.</p>
   </footer>
 
+  <script src="/estilos/api.js"></script>
   <script>
     function updateMenu() {
       const userId = localStorage.getItem('userId');
@@ -147,7 +146,7 @@ En ambos casos, FastAPI sabrá que debe buscar el archivo `style.css` dentro de 
       const email = document.getElementById('register-email').value;
       const password = document.getElementById('register-password').value;
 
-      const response = await fetch('/register', {
+      const response = await apiFetch('/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, email, password })
@@ -178,7 +177,7 @@ En ambos casos, FastAPI sabrá que debe buscar el archivo `style.css` dentro de 
         }
 //---------------------------------
 
-      const response = await fetch('/login', {
+      const response = await apiFetch('/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
