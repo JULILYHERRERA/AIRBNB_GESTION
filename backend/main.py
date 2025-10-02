@@ -15,8 +15,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 load_dotenv()
 app = FastAPI()
-app.mount("/estilos", StaticFiles(directory="frontend"), name="estilos")
-app.mount("/frontend", StaticFiles(directory="frontend"), name="frontend")
+app.mount('/static', StaticFiles(directory="static"), name="static")
 
 app.add_middleware(
     CORSMiddleware,
