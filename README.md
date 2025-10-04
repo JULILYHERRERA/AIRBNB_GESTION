@@ -98,7 +98,7 @@ Durante el primer arranque se crean las tablas necesarias y se insertan los regi
    ```
 3. Entra a la carpeta del proyecto:
    ```bash
-   cd AIRBNB_GESTION/migration
+   cd AIRBNB_GESTION/
    ```
 4. (Opcional) Define `DATABASE_URL` y otras credenciales en `.env` para que Compose las consuma.
 5. Levanta los servicios:
@@ -113,3 +113,4 @@ Servicios incluidos en `docker-compose.yml`:
 - **fastapi-backend**: ejecuta `backend/main.py`, monta el directorio `frontend/` como recursos estáticos y expone la API REST.
 - **nginx-frontend**: entrega las páginas HTML precompiladas con la configuración de `frontend/nginx.conf`.
 - **local-postgres-db**: instancia PostgreSQL 15 con volumen persistente `booking-postgres-data`.
+
