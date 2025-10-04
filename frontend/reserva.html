@@ -49,7 +49,9 @@
     <p>&copy; 2025 AIRBNB JH-LS. Todos los derechos reservados.</p>
   </footer>
 
+  <script src="/estilos/api.js"></script>
   <script>
+
     const reservationData = JSON.parse(localStorage.getItem('reservationData'));
 
     if (reservationData) {
@@ -62,6 +64,7 @@
       alert('No se encontraron datos de reserva. Por favor, vuelva a la página de reserva.');
       window.location.href = "index.html";
     }
+    
     document.getElementById('payment-details').addEventListener('submit', async (e) => {
       e.preventDefault();
 
@@ -75,7 +78,8 @@
       }
 
       try {
-          const response = await fetch(`/reserved-dates/${reservationData.property_id}`);
+          // Usar API_URL para todas las peticiones
+          const response = await apiFetch(`/reserved-dates/${reservationData.property_id}`);
           const data = await response.json();
           const blockedDates = data.reserved_dates;
 
@@ -93,7 +97,7 @@
               currentDate.setDate(currentDate.getDate() + 1);
           }
 
-          const reserveResponse = await fetch('/reserve', {
+          const reserveResponse = await apiFetch('/reserve', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
