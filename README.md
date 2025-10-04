@@ -106,11 +106,12 @@ Durante el primer arranque se crean las tablas necesarias y se insertan los regi
    docker compose up --build
    ```
 6. Accede a:
-   - `http://localhost` para el frontend servido por Nginx.
-   - `http://localhost:8000/docs` para la documentación interactiva.
+   - `http://localhost:8000` para el frontend servido por Nginx.
+   - `http://localhost:8000/docs` para la documentación interactiva (swagger ui).
 
 Servicios incluidos en `docker-compose.yml`:
 - **fastapi-backend**: ejecuta `backend/main.py`, monta el directorio `frontend/` como recursos estáticos y expone la API REST.
 - **nginx-frontend**: entrega las páginas HTML precompiladas con la configuración de `frontend/nginx.conf`.
 - **local-postgres-db**: instancia PostgreSQL 15 con volumen persistente `booking-postgres-data`.
+
 
