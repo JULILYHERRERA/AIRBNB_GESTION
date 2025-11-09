@@ -2,14 +2,17 @@
 
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, FastAPI, HTTPException
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi import APIRouter, BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from datetime import date, datetime, timedelta
 import os
+from authlib.integrations.starlette_client import OAuth
+
 
 # Nuevas importaciones para PostgreSQL
 from sqlalchemy import create_engine, text
@@ -32,6 +35,7 @@ if not FRONTEND_DIR.exists():
     raise RuntimeError(f"Frontend directory '{FRONTEND_DIR}' does not exist")
 
 app = FastAPI()
+app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET_KEY", "super-secret-key"))
 app.mount('/static', StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.mount('/estilos', StaticFiles(directory=FRONTEND_DIR / "estilos"), name="estilos")
 
@@ -43,11 +47,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Configurar OAuth (Google)
+oauth = OAuth()
+
+# Verificar que las variables de entorno estén configuradas
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+
+if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+    print("⚠️  ADVERTENCIA: GOOGLE_CLIENT_ID o GOOGLE_CLIENT_SECRET no están configurados")
+    print("⚠️  La autenticación con Google no funcionará sin estas variables")
+else:
+    oauth.register(
+        name="google",
+        client_id=GOOGLE_CLIENT_ID,
+        client_secret=GOOGLE_CLIENT_SECRET,
+        server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+        client_kwargs={"scope": "openid email profile"},
+        authorize_state=None,  # Deshabilitar state para simplificar
+    )
+
 # Configuración de la conexión a la base de datos local
 DATABASE_URL = os.getenv("DATABASE_URL")
+IS_DOCKER = os.getenv("IS_DOCKER", "false").lower() == "true"
 
-if not DATABASE_URL:
+if not IS_DOCKER:
+    # When running locally, use SQLite
     DATABASE_URL = f"sqlite:///{BASE_DIR / 'app.db'}"
+elif not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL must be set when running in Docker")
 
 engine_kwargs = {}
 if DATABASE_URL.startswith("sqlite"):
@@ -345,6 +373,87 @@ async def login(user: LoginRequest):
     
     user_data = result._asdict()
     return JSONResponse(content={"message": "Inicio de sesión exitoso", "user_id": user_data['id']}, status_code=200)
+
+
+# --- Google OAuth endpoints ---
+@api_router.get("/auth/google/login")
+async def google_login(request: Request):
+    """Inicia el flujo de OAuth2 con Google redirigiendo al consentimiento."""
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        raise HTTPException(status_code=500, detail="Google OAuth no está configurado en el servidor")
+    
+    # Usar la URL base del request para construir el redirect_uri
+    base_url = str(request.base_url).rstrip('/')
+    redirect_uri = f"{base_url}/auth/google/callback"
+    
+    print(f"🔐 Iniciando login con Google - Redirect URI: {redirect_uri}")
+    
+    return await oauth.google.authorize_redirect(request, redirect_uri)
+
+
+@api_router.get("/auth/google/callback")
+async def google_auth_callback(request: Request):
+    """Callback que Google llamará tras la autenticación."""
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        raise HTTPException(status_code=500, detail="Google OAuth no está configurado en el servidor")
+    
+    try:
+        print("🔄 Procesando callback de Google...")
+        token = await oauth.google.authorize_access_token(request)
+        print("✅ Token de acceso recibido")
+    except Exception as e:
+        print(f"❌ Error en autorización de Google: {e}")
+        raise HTTPException(status_code=400, detail=f"Error en autorización de Google: {e}")
+
+    # Obtener datos del usuario desde el endpoint userinfo
+    try:
+        resp = await oauth.google.get("https://openidconnect.googleapis.com/v1/userinfo", token=token)
+        user_info = resp.json()
+        print(f"📧 Información del usuario: {user_info}")
+    except Exception as e:
+        print(f"❌ Error obteniendo información del usuario: {e}")
+        raise HTTPException(status_code=400, detail="No se pudo obtener la información del usuario de Google")
+
+    email = user_info.get("email")
+    name = user_info.get("name") or user_info.get("given_name") or "Usuario Google"
+
+    if not email:
+        print("❌ No se pudo obtener el email del usuario")
+        raise HTTPException(status_code=400, detail="No se pudo obtener el correo de la cuenta de Google")
+
+    # Buscar o crear el usuario en la base de datos
+    query_check = 'SELECT * FROM "Users" WHERE email = :email'
+    existing_user = execute_query(query_check, {"email": email}).first()
+
+    if existing_user:
+        user_id = existing_user._mapping["id"]
+        print(f"✅ Usuario existente encontrado: ID {user_id}")
+    else:
+        # Insertar usuario con contraseña vacía para autenticación Google
+        print(f"👤 Creando nuevo usuario: {name} ({email})")
+        if IS_SQLITE:
+            query_insert = 'INSERT INTO "Users" (name, email, password) VALUES (:name, :email, :password)'
+            result = execute_query(query_insert, {"name": name, "email": email, "password": ""})
+            user_id = result.lastrowid
+        else:
+            query_insert = 'INSERT INTO "Users" (name, email, password) VALUES (:name, :email, :password) RETURNING id'
+            result = execute_query(query_insert, {"name": name, "email": email, "password": ""})
+            user_id = result.scalar()
+        print(f"✅ Nuevo usuario creado: ID {user_id}")
+
+    # Redirigir al frontend con el user_id en la URL
+    frontend_url = f"/index.html?google_login_success=true&user_id={user_id}"
+    print(f"🔄 Redirigiendo a: {frontend_url}")
+    return RedirectResponse(url=frontend_url)
+
+
+@api_router.get("/auth/google/success")
+async def google_login_success(user_id: int):
+    """Endpoint para verificar el éxito del login con Google."""
+    return JSONResponse(content={
+        "message": "Inicio de sesión con Google exitoso", 
+        "user_id": user_id
+    }, status_code=200)
 
 def ensure_date(value):
     if isinstance(value, datetime):
