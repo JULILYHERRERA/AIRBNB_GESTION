@@ -376,22 +376,23 @@ async def login(user: LoginRequest):
 
 
 # --- Google OAuth endpoints ---
-@api_router.get("/auth/google/login")
+auth_router = APIRouter()
+
+@auth_router.get("/auth/google/login")
 async def google_login(request: Request):
     """Inicia el flujo de OAuth2 con Google redirigiendo al consentimiento."""
     if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
         raise HTTPException(status_code=500, detail="Google OAuth no está configurado en el servidor")
     
-    # Usar la URL base del request para construir el redirect_uri
-    base_url = str(request.base_url).rstrip('/')
-    redirect_uri = f"{base_url}/auth/google/callback"
+    # Para desarrollo local, usar localhost directamente para que coincida con Google Console
+    redirect_uri = "http://localhost/auth/google/callback"
     
     print(f"🔐 Iniciando login con Google - Redirect URI: {redirect_uri}")
     
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 
-@api_router.get("/auth/google/callback")
+@auth_router.get("/auth/google/callback")
 async def google_auth_callback(request: Request):
     """Callback que Google llamará tras la autenticación."""
     if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
@@ -447,7 +448,7 @@ async def google_auth_callback(request: Request):
     return RedirectResponse(url=frontend_url)
 
 
-@api_router.get("/auth/google/success")
+@auth_router.get("/auth/google/success")
 async def google_login_success(user_id: int):
     """Endpoint para verificar el éxito del login con Google."""
     return JSONResponse(content={
@@ -638,5 +639,5 @@ async def get_feedback(property_id: int):
     return JSONResponse(content={"feedback": feedback_list}, status_code=200)
 
 
-app.include_router(api_router)
 app.include_router(api_router, prefix="/api")
+app.include_router(auth_router, prefix="")

@@ -74,7 +74,31 @@ Las rutas están disponibles tanto en `/` como con el prefijo `/api`.
 3. **Configurar variables de entorno (si aplica):**
    - `DATABASE_URL`: cadena SQLAlchemy. Si no se define, se crea `backend/app.db` con SQLite.
    - `FRONTEND_DIR`: ruta alternativa al directorio `frontend/`.
+   - `GOOGLE_CLIENT_ID`: ID del cliente OAuth de Google (requerido para login con Google).
+   - `GOOGLE_CLIENT_SECRET`: Secreto del cliente OAuth de Google (requerido para login con Google).
+   - `SESSION_SECRET_KEY`: Clave secreta para sesiones (opcional, se genera automáticamente si no se define).
    - Opcionalmente coloca estas claves en un archivo `.env`; `load_dotenv()` las leerá automáticamente.
+
+   ### Configuración de credenciales de Google OAuth
+
+   Para habilitar el login con Google, necesitas crear un proyecto en Google Cloud Console:
+
+   1. Ve a [Google Cloud Console](https://console.cloud.google.com/).
+   2. Crea un nuevo proyecto o selecciona uno existente.
+   3. Habilita la API de Google+ (si no está habilitada).
+   4. Ve a "Credenciales" en el menú lateral.
+   5. Haz clic en "Crear credenciales" > "ID de cliente de OAuth".
+   6. Selecciona "Aplicación web" como tipo de aplicación.
+   7. En "Orígenes de JavaScript autorizados", agrega: `http://localhost`
+   8. En "URI de redireccionamiento autorizados", agrega: `http://localhost/auth/google/callback`
+   9. Copia el "ID de cliente" y el "Secreto de cliente".
+   10. Crea un archivo `.env` en la raíz del proyecto con:
+       ```
+       GOOGLE_CLIENT_ID=tu_id_de_cliente_aqui
+       GOOGLE_CLIENT_SECRET=tu_secreto_de_cliente_aqui
+       ```
+   11. Para desarrollo local, cambia el tipo de aplicación a "Aplicación de escritorio" en lugar de "Aplicación web" para permitir localhost como URI de redireccionamiento.
+
 4. **Inicializar y levantar FastAPI:**
    ```bash
    uvicorn backend.main:app --reload
