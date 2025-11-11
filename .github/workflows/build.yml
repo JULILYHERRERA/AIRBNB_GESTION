@@ -44,15 +44,17 @@ jobs:
         env:
           IS_DOCKER: "true"
           DATABASE_URL: "sqlite:///:memory:"
+          PYTHONPATH: ${{ github.workspace }}/backend
         run: |
-          pytest --collect-only -q tests/ || true
+          python -m pytest --collect-only -q tests/ || true
 
       - name: Run pytest (explicit path)
         env:
           IS_DOCKER: "true"
           DATABASE_URL: "sqlite:///:memory:"
+          PYTHONPATH: ${{ github.workspace }}/backend
         run: |
-          pytest tests/ -q
+          python -m pytest -q tests/
 
   build_and_push:
     name: Build & Push Docker images
