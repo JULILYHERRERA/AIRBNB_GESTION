@@ -34,10 +34,21 @@ else:
 if not FRONTEND_DIR.exists():
     raise RuntimeError(f"Frontend directory '{FRONTEND_DIR}' does not exist")
 
+# Base URL used to redirect users to the frontend after OAuth/login flows.
+# Make this configurable so local testing (with port-forward) and deployed
+# environments can use the appropriate host/port.
+FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:8080")
+
 app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET_KEY", "super-secret-key"))
-app.mount('/static', StaticFiles(directory=BASE_DIR / "static"), name="static")
-app.mount('/estilos', StaticFiles(directory=FRONTEND_DIR / "estilos"), name="estilos")
+
+# Mount static files - try /app/static first, then fallback to frontend/estilos
+static_dir = BASE_DIR / "static"
+if not static_dir.exists():
+    static_dir = FRONTEND_DIR / "estilos"
+if static_dir.exists():
+    app.mount('/static', StaticFiles(directory=static_dir), name="static")
+    app.mount('/estilos', StaticFiles(directory=static_dir), name="estilos")
 
 app.add_middleware(
     CORSMiddleware,
@@ -384,11 +395,17 @@ async def google_login(request: Request):
     if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
         raise HTTPException(status_code=500, detail="Google OAuth no está configurado en el servidor")
     
-    # Para desarrollo local, usar localhost directamente para que coincida con Google Console
-    redirect_uri = "http://localhost/auth/google/callback"
-    
-    print(f"🔐 Iniciando login con Google - Redirect URI: {redirect_uri}")
-    
+    # Para desarrollo local, permitir sobreescribir la redirect URI desde una variable de entorno.
+    # Por defecto usamos localhost:8000 para que el port-forward a ese puerto funcione en pruebas locales.
+    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/google/callback")
+
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        # Ya se verifica más arriba, pero dejamos un log claro aquí.
+        print("⚠️  ADVERTENCIA: GOOGLE_CLIENT_ID o GOOGLE_CLIENT_SECRET no están configurados")
+        print(f"🔐 Usando redirect_uri (pero auth no configurado): {redirect_uri}")
+    else:
+        print(f"🔐 Iniciando login con Google - Redirect URI: {redirect_uri}")
+
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 
@@ -442,9 +459,10 @@ async def google_auth_callback(request: Request):
             user_id = result.scalar()
         print(f"✅ Nuevo usuario creado: ID {user_id}")
 
-    # Redirigir al frontend con el user_id en la URL
-    frontend_url = f"/index.html?google_login_success=true&user_id={user_id}"
-    print(f"🔄 Redirigiendo a: {frontend_url}")
+    # Redirigir al frontend con el user_id en la URL. Usar la base URL absoluta
+    # para que el navegador sea dirigido al servidor frontend (ej. localhost:8080)
+    frontend_url = f"{FRONTEND_BASE_URL}/index.html?google_login_success=true&user_id={user_id}"
+    print(f"🔄 Redirigiendo al frontend: {frontend_url}")
     return RedirectResponse(url=frontend_url)
 
 
