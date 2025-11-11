@@ -1,6 +1,6 @@
 services:
   backend:
-    image: hurluis/migration-backend:1.0
+    image: julilyherrera/airbnb-backend:latest   
     container_name: fastapi-backend
     restart: always
     ports:
@@ -17,7 +17,7 @@ services:
       - db
 
   frontend:
-    image: hurluis/migration-frontend:1.0
+    image: julilyherrera/airbnb-frontend:latest 
     container_name: nginx-frontend
     restart: always
     ports:
