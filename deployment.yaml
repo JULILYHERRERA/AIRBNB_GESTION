@@ -109,8 +109,8 @@ spec:
     spec:
       containers:
       - name: backend
-        image: eritzsm/airbnb-backend:latest
-        imagePullPolicy: IfNotPresent
+        image: eritzsm/airbnb-backend:v1.1
+        imagePullPolicy: Always
         ports:
         - containerPort: 8000
           name: http
@@ -221,8 +221,8 @@ spec:
     spec:
       containers:
       - name: frontend
-        image: eritzsm/airbnb-frontend:latest
-        imagePullPolicy: IfNotPresent
+        image: eritzsm/airbnb-frontend:v1.1
+        imagePullPolicy: Always
         ports:
         - containerPort: 80
           name: http

@@ -1,9 +1,6 @@
 services:
   backend:
-    build:
-      context: .
-      dockerfile: Dockerfile.backend
-    image: eritzsm/airbnb-backend:20251110160500
+    image: julilyherrera/airbnb-backend:latest   
     container_name: fastapi-backend
     restart: always
     ports:
@@ -20,7 +17,7 @@ services:
       - db
 
   frontend:
-    image: eritzsm/airbnb-frontend:20251110154715
+    image: julilyherrera/airbnb-frontend:latest 
     container_name: nginx-frontend
     restart: always
     ports:
