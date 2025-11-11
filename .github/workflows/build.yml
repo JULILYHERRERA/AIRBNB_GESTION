@@ -40,10 +40,13 @@ jobs:
           pip install -r requirements.txt
           pip install pytest httpx
 
+      - name: Clean previous test DB (if any)
+        run: rm -f test_ci.db
+
       - name: Pytest collect-only (debug)
         env:
           IS_DOCKER: "true"
-          DATABASE_URL: "sqlite:///:memory:"
+          DATABASE_URL: "sqlite:///./test_ci.db"   # <-- aquí
           PYTHONPATH: ${{ github.workspace }}/backend
         run: |
           python -m pytest --collect-only -q tests/ || true
@@ -51,7 +54,7 @@ jobs:
       - name: Run pytest (explicit path)
         env:
           IS_DOCKER: "true"
-          DATABASE_URL: "sqlite:///:memory:"
+          DATABASE_URL: "sqlite:///./test_ci.db"   # <-- y aquí
           PYTHONPATH: ${{ github.workspace }}/backend
         run: |
           python -m pytest -q tests/

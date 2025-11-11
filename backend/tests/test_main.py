@@ -1,6 +1,6 @@
 import os
-os.environ["IS_DOCKER"] = "true"                 # obliga a usar DATABASE_URL
-os.environ["DATABASE_URL"] = "sqlite:///:memory:"  # BD en memoria para tests
+os.environ["IS_DOCKER"] = "true"
+os.environ["DATABASE_URL"] = "sqlite:///./test_ci.db"  # BD en archivo (repo root/backend)
 
 # ahora sí importamos la app ya con la BD lista
 from fastapi.testclient import TestClient
