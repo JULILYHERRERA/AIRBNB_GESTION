@@ -12,11 +12,13 @@ from dotenv import load_dotenv
 from datetime import date, datetime, timedelta
 import os
 from authlib.integrations.starlette_client import OAuth
+import httpx
 
 
 # Nuevas importaciones para PostgreSQL
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
+from prometheus_fastapi_instrumentator import Instrumentator
 
 load_dotenv()
 
@@ -37,10 +39,13 @@ if not FRONTEND_DIR.exists():
 # Base URL used to redirect users to the frontend after OAuth/login flows.
 # Make this configurable so local testing (with port-forward) and deployed
 # environments can use the appropriate host/port.
-FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:8080")
+FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost")
 
 app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET_KEY", "super-secret-key"))
+
+# Instrumentación de Prometheus
+Instrumentator().instrument(app).expose(app)
 
 # Mount static files - try /app/static first, then fallback to frontend/estilos
 static_dir = BASE_DIR / "static"
@@ -61,6 +66,9 @@ app.add_middleware(
 # Configurar OAuth (Google)
 oauth = OAuth()
 
+# Crear cliente HTTP asíncrono para OAuth (necesario para Authlib con FastAPI)
+httpx_client = httpx.AsyncClient(timeout=30.0)
+
 # Verificar que las variables de entorno estén configuradas
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
@@ -74,8 +82,10 @@ else:
         client_id=GOOGLE_CLIENT_ID,
         client_secret=GOOGLE_CLIENT_SECRET,
         server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-        client_kwargs={"scope": "openid email profile"},
-        authorize_state=None,  # Deshabilitar state para simplificar
+        client_kwargs={
+            "scope": "openid email profile",
+            "timeout": 30.0
+        }
     )
 
 # Configuración de la conexión a la base de datos local
@@ -395,17 +405,17 @@ async def google_login(request: Request):
     if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
         raise HTTPException(status_code=500, detail="Google OAuth no está configurado en el servidor")
     
-    # Para desarrollo local, permitir sobreescribir la redirect URI desde una variable de entorno.
-    # Por defecto usamos localhost:8000 para que el port-forward a ese puerto funcione en pruebas locales.
-    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/google/callback")
-
-    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-        # Ya se verifica más arriba, pero dejamos un log claro aquí.
-        print("⚠️  ADVERTENCIA: GOOGLE_CLIENT_ID o GOOGLE_CLIENT_SECRET no están configurados")
-        print(f"🔐 Usando redirect_uri (pero auth no configurado): {redirect_uri}")
-    else:
-        print(f"🔐 Iniciando login con Google - Redirect URI: {redirect_uri}")
-
+    # Usar la redirect URI desde variables de entorno o construirla basada en el host recibido
+    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI")
+    
+    if not redirect_uri:
+        # Fallback: construir basado en el header X-Forwarded-Proto y Host (para Docker/proxy reverso)
+        scheme = request.headers.get("X-Forwarded-Proto", "http")
+        host = request.headers.get("X-Forwarded-Host", request.headers.get("Host", "localhost"))
+        redirect_uri = f"{scheme}://{host}/auth/google/callback"
+    
+    print(f"🔐 Iniciando login con Google - Redirect URI: {redirect_uri}")
+    
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 
