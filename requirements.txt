@@ -7,6 +7,5 @@ authlib==1.2.0
 itsdangerous
 starlette
 httpx
-prometheus-client
 prometheus-fastapi-instrumentator
 
