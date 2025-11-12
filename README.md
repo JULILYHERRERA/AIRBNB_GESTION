@@ -1,121 +1,359 @@
 # 🏡 Plataforma de Reservas de Propiedades
 
-Este proyecto es una plataforma web tipo Airbnb desarrollada con **HTML**, **CSS**, **FastAPI** y **Supabase**, que permite a los usuarios explorar propiedades en alquiler, ver detalles, realizar reservas con validación, y dejar retroalimentación para futuros usuarios.
+Aplicación tipo Airbnb compuesta por un backend *FastAPI* y un conjunto de páginas HTML/CSS estáticas. El backend expone una API REST para gestionar usuarios, propiedades, reservas y feedback, persiste en SQLite o PostgreSQL y sirve los assets del frontend cuando se ejecuta localmente o dentro del contenedor.
 
-## 📁 Estructura del Proyecto
+## 🧱 Arquitectura
 
+| Capa | Descripción |
+| --- | --- |
+| Backend | Servicio FastAPI (backend/main.py) con ORM ligero basado en SQLAlchemy, inicialización de tablas y sembrado automático de propiedades para sincronizarse con el frontend. |
+| Frontend | Vistas estáticas (frontend/*.html) que consumen la API mediante fetch, se estilizan con TailwindCSS y se sirven con FastAPI o un contenedor Nginx. |
+| Base de datos | SQLite por defecto (backend/app.db) o PostgreSQL si se define DATABASE_URL. |
+| Observabilidad | Exposición de métricas Prometheus desde FastAPI y stack de monitoreo Prometheus + Grafana preconfigurado (monitoring/*). |
+
+## 📁 Estructura del repositorio
+
+
+├── backend/
+│   ├── Dockerfile                 # Imagen del backend (python:3.11-slim + deps)
+│   ├── main.py                    # FastAPI (API + seed + estáticos /estilos)
+│   ├── requirements.txt           # Incluye uvicorn, fastapi, sqlalchemy, pydantic, psycopg2-binary, authlib, python-dotenv
+│   ├── tests/
+│   │   └── test_main.py           # Tests de API (sqlite file en CI)
+│   └── static/                    # Recursos extra si los usas
+│
+├── frontend/
+│   ├── *.html                     # Vistas públicas
+│   ├── estilos/
+│   │   ├── api.js                 # BASE_URL de la API (ej: http://localhost:8000)
+│   │   └── styles.css             # Estilos
+│   ├── nginx.conf                 # Nginx CORREGIDO (sirve /estilos local, proxy /api y /auth sin duplicar)
+│   └── Dockerfile                 # Imagen Nginx (copia html + nginx.conf)
+│
+├── monitoring/
+│   ├── prometheus/
+│   │   └── prometheus.yml         # Configuración de scrapeo para backend/prometheus
+│   └── grafana/
+│       ├── provisioning/          # Datasource + dashboards pre-provisionados
+│       └── dashboards/            # Dashboard "FastAPI - Observabilidad"
+│
+├── .github/
+│   └── workflows/
+│       └── build.yml              # CI/CD: pytest + build/push (push solo en main, con workflow_dispatch)
+│
+├── docker-compose.yml             # Orquestación backend, frontend y Postgres
+├── .env.example                   # GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET (ejemplo)
+├── .dockerignore                  # Ignora venv, __pycache__, etc. (raíz y/o backend/frontend)
+├── LICENSE.txt
+├── README.md
+└── (opcional) eliminar:
+    ├── Dockerfile.backend         # ← legado, ya no se usa
+    ├── main.py                    # ← raíz (histórico), usar backend/main.py
+    └── requirements.txt           # ← raíz (histórico), usar backend/requirements.txt
+
+
+
+> ℹ El backend de referencia se encuentra en backend/main.py. El main.py de la raíz se conserva únicamente por compatibilidad con despliegues antiguos.
+
+## 🧩 Funcionalidades del backend
+
+- Autenticación simple: registro y login con almacenamiento de credenciales.
+- Gestión de propiedades: catálogo precargado con cinco inmuebles y consultas desde el frontend.
+- Reservas con validaciones: bloqueo de solapamientos, verificación de fechas futuras y actualización de estados vencidos mediante tareas en segundo plano.
+- Historial del usuario: endpoints para reservas activas y pasadas.
+- Feedback: envío y consulta de comentarios por propiedad.
+
+## 🌐 Endpoints principales
+
+Las rutas están disponibles tanto en / como con el prefijo /api.
+
+| Método | Ruta | Descripción |
+| ------ | ---- | ----------- |
+| POST | /register | Crea un usuario y devuelve su id. |
+| POST | /login | Valida credenciales y responde con el user_id. |
+| GET | /reserved-dates/{property_id} | Lista fechas ocupadas para el calendario de reservas. |
+| POST | /reserve | Crea una reserva si no hay solapamientos y la fecha es futura. |
+| GET | /active-reservations/{user_id} | Obtiene reservas activas con detalles de la propiedad. |
+| GET | /update-reservations | Actualiza en segundo plano las reservas expiradas. |
+| GET | /past-reservations/{user_id} | Devuelve reservas históricas del usuario. |
+| POST | /cancel-reservation | Cancela una reserva activa antes del check-in. |
+| POST | /feedback | Almacena un comentario y calificación para una propiedad. |
+| GET | /feedback/{property_id} | Recupera todos los comentarios asociados a la propiedad. |
+
+## 📊 Observabilidad y monitoreo
+
+- El backend expone métricas compatibles con Prometheus en `http://<host>:8000/metrics`.
+- Se instrumentan automáticamente los tiempos de respuesta, tamaños de payload y número de peticiones mediante [`prometheus-fastapi-instrumentator`](https://github.com/trallnag/prometheus-fastapi-instrumentator).
+- Se publican métricas de negocio adicionales:
+  - `booking_reservations_total{outcome="..."}`: intentos de reserva clasificados por resultado (`success`, `conflict`, `invalid_range`, `past_date`, `invalid_date_format`).
+  - `booking_reservation_nights`: histograma de noches reservadas.
+  - `booking_cancellations_total{outcome="..."}`: cancelaciones procesadas (`success`, `too_late`, `already_inactive`, `not_found`).
+  - `booking_database_up`: gauge (0/1) que refleja el estado de la conexión a la base de datos, actualizado en segundo plano cada `DB_HEALTH_CHECK_INTERVAL` segundos (30 por defecto).
+
+### Stack de monitoreo con Docker Compose
+
+El archivo [`docker-compose.yml`](docker-compose.yml) incluye servicios listos para Prometheus y Grafana además del backend, frontend y PostgreSQL.
+
+```bash
+docker compose up --build backend frontend db prometheus grafana
 ```
-├── page.HTML             # Página principal con listado de propiedades
-├── detalle.html          # Detalles individuales de cada propiedad
-├── reserva.html          # Formulario para completar la reserva
-├── reserva-bef.html      # Página previa a la reserva
-├── Mis-reservas.html     # Historial de reservas del usuario
-├── feedback.html         # Sección para comentarios y retroalimentación
-├── styles.css            # Estilos personalizados
-├── main.py               # Backend con FastAPI (gestión de lógica del sistema)
-```
 
-## 🚀 Características Principales
+- Prometheus: http://localhost:9090 (configuración en `monitoring/prometheus/prometheus.yml`).
+- Grafana: http://localhost:3000 (usuario/contraseña por defecto `admin`/`admin`, sobreescribibles con `GRAFANA_ADMIN_USER` y `GRAFANA_ADMIN_PASSWORD`).
+- Dashboard inicial: *FastAPI - Observabilidad* cargado automáticamente (provisioning en `monitoring/grafana/*`).
 
-- 🎯 **Explorar Propiedades**: Visualiza propiedades con imagen, precio y ubicación.
-- 📍 **Detalles Ampliados**: Imágenes grandes, mapa embebido y más información.
-- ✅ **Validación de Usuarios**: Inicio de sesión, registro y autenticación con Supabase.
-- 📆 **Reservas Inteligentes**: Guarda y bloquea fechas ya reservadas.
-- 💬 **Retroalimentación**: Usuarios pueden dejar comentarios útiles sobre los alojamientos y calificaciones.
-- 🔐 **Gestión de Reservas**: Visualización desde “Mis reservas”.
-- ☁️ **Base de Datos en la Nube**: Usando Supabase para guardar usuarios, reservas y feedbacks.
-- 🔄 **Actualización Asíncrona**: Background tasks y respuestas rápidas vía FastAPI.
+> Consejo: si solo quieres lanzar el stack de observabilidad mientras desarrollas localmente puedes levantar `backend`, `db`, `prometheus` y `grafana`. El frontend no es necesario para visualizar métricas.
 
-## 🛠️ Tecnologías Usadas
+### Kubernetes / Prometheus Operator
 
-- **Frontend**: HTML5, CSS3
-- **Backend**: [FastAPI](https://fastapi.tiangolo.com/)
-- **Base de Datos**: [Supabase](https://supabase.com/) (PostgreSQL + Auth + Storage)
-- **Autenticación**: Supabase Auth
-- **Entorno**: Python 3.11+, dotenv, Pydantic
-- **Servidor estático (Docker)**: nginx:alpine (por ahora solo FRONTEND)
+Los manifiestos `deployment.yaml` y `service.yaml` incluyen las anotaciones `prometheus.io/*` para que un Prometheus externo (por ejemplo, el Prometheus Operator) pueda descubrir automáticamente el endpoint `/metrics` del backend.
+
+## 🖥 Ejecución local
+
+1. *Crear y activar entorno virtual (opcional):*
+   bash
+   python -m venv .venv
+   source .venv/bin/activate
+   
+2. *Instalar dependencias del backend:*
+   bash
+   pip install -r backend/requirements.txt
+   
+3. *Configurar variables de entorno (si aplica):*
+   - DATABASE_URL: cadena SQLAlchemy. Si no se define, se crea backend/app.db con SQLite.
+   - FRONTEND_DIR: ruta alternativa al directorio frontend/.
+   - GOOGLE_CLIENT_ID: ID del cliente OAuth de Google (requerido para login con Google).
+   - GOOGLE_CLIENT_SECRET: Secreto del cliente OAuth de Google (requerido para login con Google).
+   - SESSION_SECRET_KEY: Clave secreta para sesiones (opcional, se genera automáticamente si no se define).
+   - Opcionalmente coloca estas claves en un archivo .env; load_dotenv() las leerá automáticamente.
+
+   ### Configuración de credenciales de Google OAuth
+
+   Para habilitar el login con Google, necesitas crear un proyecto en Google Cloud Console:
+
+   1. Ve a [Google Cloud Console](https://console.cloud.google.com/).
+   2. Crea un nuevo proyecto o selecciona uno existente.
+   3. Habilita la API de Google+ (si no está habilitada).
+   4. Ve a "Credenciales" en el menú lateral.
+   5. Haz clic en "Crear credenciales" > "ID de cliente de OAuth".
+   6. Selecciona "Aplicación web" como tipo de aplicación.
+   7. En "Orígenes de JavaScript autorizados", agrega: http://localhost
+   8. En "URI de redireccionamiento autorizados", agrega: http://localhost/auth/google/callback
+   9. Copia el "ID de cliente" y el "Secreto de cliente".
+   10. Crea un archivo .env en la raíz del proyecto con:
+       
+       GOOGLE_CLIENT_ID=tu_id_de_cliente_aqui
+       GOOGLE_CLIENT_SECRET=tu_secreto_de_cliente_aqui
+       
+   11. Para desarrollo local, cambia el tipo de aplicación a "Aplicación de escritorio" en lugar de "Aplicación web" para permitir localhost como URI de redireccionamiento.
+
+4. *Inicializar y levantar FastAPI:*
+   bash
+   uvicorn backend.main:app --reload
+   
+5. *Abrir el frontend:*
+   - http://localhost:8000/ muestra la landing (index.html).
+   - El backend sirve /frontend, /estilos y los archivos estáticos registrados.
+
+Durante el primer arranque se crean las tablas necesarias y se insertan los registros iniciales de propiedades para mantener sincronizado el catálogo.
 
 
-## ▶️ Cómo Ejecutarlo
-1. Instala las dependencias:
-   ```bash
-   pip install fastapi "uvicorn[standard]" python-dotenv supabase
-   ```
+## ⚙ Integración Continua (CI/CD) con GitHub Actions
 
-2. Configura tus variables de entorno en un archivo `.env`:
-   ```env
-   SUPABASE_URL=https://tuproyecto.supabase.co
-   SUPABASE_KEY=tu_clave_secreta
-   ```
+Este proyecto está configurado con *GitHub Actions* para automatizar la construcción y despliegue de las imágenes Docker del backend y frontend.
 
-3. Ejecuta el servidor:
-   ```bash
-   uvicorn main:app --reload
-   ```
+Cada vez que se hace **push o merge a la rama main**:
 
-4. Abre el navegador en:
-   ```
-   http://localhost:8000
-   ```
-
-## 📌 Mejoras Futuras
-
-- Búsqueda y filtrado avanzado de propiedades.
-- Panel administrativo para propietarios.
-- Notificaciones por correo o SMS.
+✅ Se ejecutan las pruebas del backend (si existen)  
+✅ Se construyen las imágenes Docker del backend y frontend  
+✅ Se publican automáticamente en *Docker Hub*, listas para usar con docker-compose
 
 
-## 🐳 Despliegue con Docker
+---
 
-**Requisitos**
+## 🧱 Flujo Automatizado
 
-- Docker Desktop (Windows/Mac) o Docker Engine (Linux)
+📌 *Archivo del workflow:*  
+.github/workflows/docker-build.yml
 
-### Usando Docker Compose
+🔑 *Acciones principales:*
 
-El archivo `docker-compose.yml` levanta los tres servicios necesarios (frontend, backend y base de datos). Para reducir problemas de DNS al descargar imágenes base (por ejemplo, `nginx:alpine` o `python:3.11-slim`), la definición de `build` usa `network: host`, lo que permite que BuildKit reutilice directamente la configuración de red del host.
+| Acción | Descripción |
+|--------|-------------|
+| docker/login-action | Autentica en Docker Hub |
+| docker/build-push-action | Construye y publica las imágenes Docker |
 
-1. Construye y levanta los servicios:
+🧩 *Resultado:*  
+Las imágenes se suben a Docker Hub con las etiquetas:
 
-   ```bash
+- :latest
+- :1.0
+
+---
+
+## 🐋 Imágenes públicas disponibles en Docker Hub
+
+Puedes descargar y usar las imágenes directamente, sin necesidad de clonar el repositorio:
+
+| Servicio | Imagen | Comando |
+|----------|--------|---------|
+| *Backend* | julilyherrera/airbnb-backend:latest | docker pull julilyherrera/airbnb-backend:latest |
+| *Frontend* | `julilyherrera/airbnb-frontend:latest ` | docker pull julilyherrera/airbnb-frontend:latest |
+
+---
+
+### 🔄 Actualización automática
+
+Estas imágenes se regeneran y publican automáticamente cada vez que se actualiza la rama main, gracias al pipeline configurado con GitHub Actions.
+
+🚀 Esto asegura que las versiones en Docker Hub siempre estén sincronizadas con los últimos cambios del proyecto.
+
+
+
+## 🐳 Despliegue con Docker Compose
+
+- Imágenes públicas: https://hub.docker.com/repositories/eritzsm
+
+### Pasos rápidos para clonar y levantar los contenedores
+
+1. Asegúrate de tener *Docker Desktop* abierto y en ejecución.
+2. Clona el repositorio:
+   bash
+   git clone https://github.com/JULILYHERRERA/AIRBNB_GESTION.git
+   
+3. Entra a la carpeta del proyecto:
+   bash
+   cd AIRBNB_GESTION/
+   
+4. (Opcional) Define DATABASE_URL y otras credenciales en .env para que Compose las consuma.
+5. Levanta los servicios:
+   bash
    docker compose up --build
-   ```
+   
+6. Accede a:
+   - http://localhost:8000 para el frontend servido por Nginx.
+   - http://localhost:8000/docs para la documentación interactiva (swagger ui).
+   - http://localhost:9090 para explorar métricas directamente en Prometheus.
+   - http://localhost:3000 para Grafana (dashboard *FastAPI - Observabilidad*).
 
-2. Abre el navegador en:
+Servicios incluidos en docker-compose.yml:
+- *fastapi-backend*: ejecuta backend/main.py, monta el directorio frontend/ como recursos estáticos y expone la API REST.
+- *nginx-frontend*: entrega las páginas HTML precompiladas con la configuración de frontend/nginx.conf.
+- *local-postgres-db*: instancia PostgreSQL 15 con volumen persistente booking-postgres-data.
 
-   ```
-   http://localhost
-   ```
+---
 
-> 💡 Si utilizas una red corporativa con proxy, asegúrate de que Docker tenga configuradas las variables `HTTP_PROXY`, `HTTPS_PROXY` y `NO_PROXY` en la sección *Resources → Proxies* para evitar errores del tipo `lookup registry-1.docker.io: no such host`.
+## ☸️ Despliegue en Minikube (Kubernetes)
 
-### Construcción manual del frontend
+Para ejecutar la aplicación en un cluster Kubernetes local usando Minikube:
 
-Si prefieres construir únicamente el frontend estático:
+### Requisitos previos
 
-1. Ubícate en la carpeta raíz del repo (donde existe la carpeta `frontend/`) y ejecuta:
+- **Minikube** instalado y corriendo: `minikube start --driver=docker`
+- **kubectl** configurado para acceder a Minikube
+- **Docker** disponible (para compilar imágenes locales)
+- Credenciales de Google OAuth si quieres probar login con Google
 
-   ```bash
-   cd frontend
-   docker build -t airbnb-frontend .
-   ```
+### Pasos para desplegar
 
-2. Ejecuta el contenedor:
+1. **Clona el repositorio:**
+   bash
+   git clone https://github.com/JULILYHERRERA/AIRBNB_GESTION.git
+   cd AIRBNB_GESTION/
+   
 
-   ```bash
-   docker run -d --name airbnb-frontend -p 8080:80 airbnb-frontend
-   ```
+2. **Compila las imágenes Docker localmente** (en el contexto de Docker de Minikube):
+   bash
+   docker build -f Dockerfile.backend -t airbnb-backend:local . --no-cache
+   docker build -f frontend/Dockerfile -t airbnb-frontend:local ./frontend --no-cache
+   
 
-3. Abre el navegador en:
+3. **Crea los Secrets y ConfigMaps** con tus credenciales:
+   
+   Edita `secret.yaml` con tus valores:
+   bash
+   apiVersion: v1
+   kind: Secret
+   metadata:
+     name: airbnb-secret
+   type: Opaque
+   stringData:
+     POSTGRES_PASSWORD: "tu-contraseña-postgres"
+     GOOGLE_CLIENT_ID: "tu-google-client-id"
+     GOOGLE_CLIENT_SECRET: "tu-google-client-secret"
+   
+   
+   Aplica el Secret:
+   bash
+   kubectl apply -f secret.yaml
+   kubectl apply -f configmap.yaml
+   kubectl apply -f service.yaml
+   
 
-   ```
-   http://localhost:8080
-   ```
+4. **Despliega los servicios en Minikube:**
+   bash
+   kubectl apply -f deployment.yaml
+   
 
-4. Para actualizar la imagen tras cambios:
+5. **Verifica que todos los pods estén Running:**
+   bash
+   kubectl get pods
+   # Deberías ver: backend, frontend y postgres en estado Running
+   
 
-   ```bash
-   docker rm -f airbnb-frontend
-   docker build -t airbnb-frontend ./frontend
-   docker run -d --name airbnb-frontend -p 8080:80 airbnb-frontend
-   ```
+6. **Establece los port-forwards** (necesario en Minikube con Docker driver en Windows):
+   
+   En una terminal abierta:
+   bash
+   kubectl port-forward svc/frontend-service 8080:80 --address=127.0.0.1
+   
+   
+   En otra terminal abierta:
+   bash
+   kubectl port-forward svc/backend-service 8000:8000 --address=127.0.0.1
+   
+
+7. **Accede a la aplicación:**
+   - Frontend: http://localhost:8080
+   - Backend API: http://localhost:8000
+   - Swagger API Docs: http://localhost:8000/docs
+
+### Configuración importante para Google OAuth en Minikube
+
+Si quieres que funcione el login con Google en tu instalación local de Minikube:
+
+1. En **Google Cloud Console**, registra estas URIs de redirección:
+   - `http://localhost:8000/auth/google/callback`
+   - `http://localhost:8080/auth/google/callback`
+
+2. Asegúrate de que `secret.yaml` contenga:
+   bash
+   GOOGLE_CLIENT_ID: tu-id
+   GOOGLE_CLIENT_SECRET: tu-secreto
+   
+
+3. Aplica los cambios:
+   bash
+   kubectl apply -f secret.yaml
+   kubectl rollout restart deployment/backend
+   
+
+### Troubleshooting en Minikube
+
+**Problema:** Pod en `CrashLoopBackOff`
+- Revisa logs: `kubectl logs deployment/backend`
+- Verifica env vars: `kubectl describe pod <pod-name>`
+
+**Problema:** "localhost rechazó la conexión" en Google login
+- Asegúrate de que ambos port-forwards estén activos
+- Verifica que la redirect URI en Google Cloud Console sea exacta
+
+**Problema:** Backend no conecta a PostgreSQL
+- Verifica: `kubectl logs deployment/backend --tail=50 | grep -i postgre`
+- Confirma que el Secret tiene la contraseña correcta
+
+**Limpiar todo y reintentar:**
+bash
+kubectl delete -f deployment.yaml -f service.yaml -f configmap.yaml -f secret.yaml
+docker rmi airbnb-backend:local airbnb-frontend:local
+# Repetir los pasos desde el paso 2

@@ -1,19 +1,27 @@
 # python -m uvicorn main:app --reload
 
+import asyncio
+import contextlib
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, FastAPI, HTTPException
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi import APIRouter, BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from datetime import date, datetime, timedelta
 import os
+from authlib.integrations.starlette_client import OAuth
+
 
 # Nuevas importaciones para PostgreSQL
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
+
+from prometheus_client import Counter, Gauge, Histogram
+from prometheus_fastapi_instrumentator import Instrumentator, metrics
 
 load_dotenv()
 
@@ -31,9 +39,21 @@ else:
 if not FRONTEND_DIR.exists():
     raise RuntimeError(f"Frontend directory '{FRONTEND_DIR}' does not exist")
 
+# Base URL used to redirect users to the frontend after OAuth/login flows.
+# Make this configurable so local testing (with port-forward) and deployed
+# environments can use the appropriate host/port.
+FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:8080")
+
 app = FastAPI()
-app.mount('/static', StaticFiles(directory=BASE_DIR / "static"), name="static")
-app.mount('/estilos', StaticFiles(directory=FRONTEND_DIR / "estilos"), name="estilos")
+app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET_KEY", "super-secret-key"))
+
+# Mount static files - try /app/static first, then fallback to frontend/estilos
+static_dir = BASE_DIR / "static"
+if not static_dir.exists():
+    static_dir = FRONTEND_DIR / "estilos"
+if static_dir.exists():
+    app.mount('/static', StaticFiles(directory=static_dir), name="static")
+    app.mount('/estilos', StaticFiles(directory=static_dir), name="estilos")
 
 app.add_middleware(
     CORSMiddleware,
@@ -43,11 +63,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Configurar OAuth (Google)
+oauth = OAuth()
+
+# Verificar que las variables de entorno estén configuradas
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+
+if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+    print("⚠️  ADVERTENCIA: GOOGLE_CLIENT_ID o GOOGLE_CLIENT_SECRET no están configurados")
+    print("⚠️  La autenticación con Google no funcionará sin estas variables")
+else:
+    oauth.register(
+        name="google",
+        client_id=GOOGLE_CLIENT_ID,
+        client_secret=GOOGLE_CLIENT_SECRET,
+        server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+        client_kwargs={"scope": "openid email profile"},
+        authorize_state=None,  # Deshabilitar state para simplificar
+    )
+
 # Configuración de la conexión a la base de datos local
 DATABASE_URL = os.getenv("DATABASE_URL")
+IS_DOCKER = os.getenv("IS_DOCKER", "false").lower() == "true"
+DB_HEALTH_CHECK_INTERVAL = int(os.getenv("DB_HEALTH_CHECK_INTERVAL", "30"))
 
-if not DATABASE_URL:
+if not IS_DOCKER:
+    # When running locally, use SQLite
     DATABASE_URL = f"sqlite:///{BASE_DIR / 'app.db'}"
+elif not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL must be set when running in Docker")
 
 engine_kwargs = {}
 if DATABASE_URL.startswith("sqlite"):
@@ -64,6 +109,75 @@ if IS_SQLITE:
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
+
+
+instrumentator = (
+    Instrumentator(
+        should_group_status_codes=True,
+        should_ignore_untemplated=True,
+        should_instrument_requests_inprogress=True,
+        inprogress_labels=True,
+    )
+    .add(metrics.default())
+    .add(metrics.request_size())
+    .add(metrics.response_size())
+    .add(metrics.latency())
+)
+
+db_health_gauge = Gauge(
+    "booking_database_up",
+    "Indica si la base de datos responde correctamente a las verificaciones (1=OK, 0=error).",
+)
+
+reservations_counter = Counter(
+    "booking_reservations_total",
+    "Conteo total de intentos de reserva realizados a través de la API",
+    labelnames=("outcome",),
+)
+
+reservation_nights_histogram = Histogram(
+    "booking_reservation_nights",
+    "Distribución del número de noches reservadas por los usuarios",
+    buckets=(1, 2, 3, 5, 7, 10, 14, 21, 28, 60),
+)
+
+cancellations_counter = Counter(
+    "booking_cancellations_total",
+    "Número de cancelaciones procesadas por la API",
+    labelnames=("outcome",),
+)
+
+
+def update_database_health_metric() -> None:
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        db_health_gauge.set(1)
+    except SQLAlchemyError:
+        db_health_gauge.set(0)
+
+
+async def monitor_database_health():
+    """Actualiza periódicamente la métrica de salud de la base de datos."""
+
+    while True:
+        update_database_health_metric()
+        await asyncio.sleep(DB_HEALTH_CHECK_INTERVAL)
+
+
+def configure_metrics(app: FastAPI) -> None:
+    """Configura el instrumentador de Prometheus solo una vez."""
+
+    if getattr(app.state, "metrics_configured", False):
+        return
+
+    instrumentator.instrument(app).expose(
+        app,
+        include_in_schema=False,
+        endpoint="/metrics",
+        should_gzip=True,
+    )
+    app.state.metrics_configured = True
 
 
 def init_db():
@@ -346,6 +460,95 @@ async def login(user: LoginRequest):
     user_data = result._asdict()
     return JSONResponse(content={"message": "Inicio de sesión exitoso", "user_id": user_data['id']}, status_code=200)
 
+
+# --- Google OAuth endpoints ---
+auth_router = APIRouter()
+
+@auth_router.get("/auth/google/login")
+async def google_login(request: Request):
+    """Inicia el flujo de OAuth2 con Google redirigiendo al consentimiento."""
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        raise HTTPException(status_code=500, detail="Google OAuth no está configurado en el servidor")
+    
+    # Para desarrollo local, permitir sobreescribir la redirect URI desde una variable de entorno.
+    # Por defecto usamos localhost:8000 para que el port-forward a ese puerto funcione en pruebas locales.
+    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/google/callback")
+
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        # Ya se verifica más arriba, pero dejamos un log claro aquí.
+        print("⚠️  ADVERTENCIA: GOOGLE_CLIENT_ID o GOOGLE_CLIENT_SECRET no están configurados")
+        print(f"🔐 Usando redirect_uri (pero auth no configurado): {redirect_uri}")
+    else:
+        print(f"🔐 Iniciando login con Google - Redirect URI: {redirect_uri}")
+
+    return await oauth.google.authorize_redirect(request, redirect_uri)
+
+
+@auth_router.get("/auth/google/callback")
+async def google_auth_callback(request: Request):
+    """Callback que Google llamará tras la autenticación."""
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        raise HTTPException(status_code=500, detail="Google OAuth no está configurado en el servidor")
+    
+    try:
+        print("🔄 Procesando callback de Google...")
+        token = await oauth.google.authorize_access_token(request)
+        print("✅ Token de acceso recibido")
+    except Exception as e:
+        print(f"❌ Error en autorización de Google: {e}")
+        raise HTTPException(status_code=400, detail=f"Error en autorización de Google: {e}")
+
+    # Obtener datos del usuario desde el endpoint userinfo
+    try:
+        resp = await oauth.google.get("https://openidconnect.googleapis.com/v1/userinfo", token=token)
+        user_info = resp.json()
+        print(f"📧 Información del usuario: {user_info}")
+    except Exception as e:
+        print(f"❌ Error obteniendo información del usuario: {e}")
+        raise HTTPException(status_code=400, detail="No se pudo obtener la información del usuario de Google")
+
+    email = user_info.get("email")
+    name = user_info.get("name") or user_info.get("given_name") or "Usuario Google"
+
+    if not email:
+        print("❌ No se pudo obtener el email del usuario")
+        raise HTTPException(status_code=400, detail="No se pudo obtener el correo de la cuenta de Google")
+
+    # Buscar o crear el usuario en la base de datos
+    query_check = 'SELECT * FROM "Users" WHERE email = :email'
+    existing_user = execute_query(query_check, {"email": email}).first()
+
+    if existing_user:
+        user_id = existing_user._mapping["id"]
+        print(f"✅ Usuario existente encontrado: ID {user_id}")
+    else:
+        # Insertar usuario con contraseña vacía para autenticación Google
+        print(f"👤 Creando nuevo usuario: {name} ({email})")
+        if IS_SQLITE:
+            query_insert = 'INSERT INTO "Users" (name, email, password) VALUES (:name, :email, :password)'
+            result = execute_query(query_insert, {"name": name, "email": email, "password": ""})
+            user_id = result.lastrowid
+        else:
+            query_insert = 'INSERT INTO "Users" (name, email, password) VALUES (:name, :email, :password) RETURNING id'
+            result = execute_query(query_insert, {"name": name, "email": email, "password": ""})
+            user_id = result.scalar()
+        print(f"✅ Nuevo usuario creado: ID {user_id}")
+
+    # Redirigir al frontend con el user_id en la URL. Usar la base URL absoluta
+    # para que el navegador sea dirigido al servidor frontend (ej. localhost:8080)
+    frontend_url = f"{FRONTEND_BASE_URL}/index.html?google_login_success=true&user_id={user_id}"
+    print(f"🔄 Redirigiendo al frontend: {frontend_url}")
+    return RedirectResponse(url=frontend_url)
+
+
+@auth_router.get("/auth/google/success")
+async def google_login_success(user_id: int):
+    """Endpoint para verificar el éxito del login con Google."""
+    return JSONResponse(content={
+        "message": "Inicio de sesión con Google exitoso", 
+        "user_id": user_id
+    }, status_code=200)
+
 def ensure_date(value):
     if isinstance(value, datetime):
         return value.date()
@@ -359,15 +562,18 @@ def ensure_date(value):
     raise ValueError("Formato de fecha desconocido")
 
 
-def serialize_reservation_row(row):
+def row_to_serializable_dict(row):
     data = dict(row._mapping)
 
-    for key in ("in_time", "out_time", "created_at"):
-        value = data.get(key)
+    for key, value in data.items():
         if isinstance(value, (datetime, date)):
             data[key] = value.isoformat()
 
     return data
+
+
+def serialize_reservation_row(row):
+    return row_to_serializable_dict(row)
 
 
 @api_router.get("/reserved-dates/{property_id}")
@@ -396,10 +602,16 @@ async def reserve(reservation: ReservationRequest):
         in_time = datetime.strptime(reservation.in_time, "%Y-%m-%d")
         out_time = datetime.strptime(reservation.out_time, "%Y-%m-%d")
     except ValueError:
+        reservations_counter.labels(outcome="invalid_date_format").inc()
         return JSONResponse(content={"message": "Formato de fecha inválido. Use YYYY-MM-DD"}, status_code=400)
 
     if in_time.date() < datetime.now().date():
+        reservations_counter.labels(outcome="past_date").inc()
         return JSONResponse(content={"message": "No puedes reservar fechas pasadas"}, status_code=400)
+
+    if out_time <= in_time:
+        reservations_counter.labels(outcome="invalid_range").inc()
+        return JSONResponse(content={"message": "La fecha de salida debe ser posterior a la fecha de entrada"}, status_code=400)
 
     # Comprobar si hay reservas que se solapan
     # Una reserva se solapa si (start1 <= end2) and (end1 >= start2)
@@ -414,6 +626,7 @@ async def reserve(reservation: ReservationRequest):
         {"property_id": reservation.property_id, "in_time": in_time, "out_time": out_time},
     ).first()
     if existing_reservation:
+        reservations_counter.labels(outcome="conflict").inc()
         return JSONResponse(content={"message": "La propiedad ya está reservada en esas fechas"}, status_code=400)
 
     # Crear la nueva reserva
@@ -427,6 +640,10 @@ async def reserve(reservation: ReservationRequest):
         "in_time": in_time,
         "out_time": out_time
     })
+
+    reservations_counter.labels(outcome="success").inc()
+    nights = max((out_time.date() - in_time.date()).days, 1)
+    reservation_nights_histogram.observe(nights)
 
     return JSONResponse(content={"message": "Reserva realizada con éxito"}, status_code=201)
 
@@ -487,16 +704,19 @@ async def cancel_reservation(payload: CancelReservationRequest):
     ).first()
 
     if not booking:
+        cancellations_counter.labels(outcome="not_found").inc()
         raise HTTPException(status_code=404, detail="Reserva no encontrada")
 
     booking_data = booking._mapping
     if booking_data["status"] != "activo":
+        cancellations_counter.labels(outcome="already_inactive").inc()
         return JSONResponse(content={"message": "La reserva ya no está activa"}, status_code=400)
 
     check_in_date = ensure_date(booking_data["in_time"])
     today = datetime.now().date()
 
     if check_in_date <= today:
+        cancellations_counter.labels(outcome="too_late").inc()
         return JSONResponse(content={"message": "Solo puedes cancelar antes del día de ingreso"}, status_code=400)
 
     execute_query(
@@ -504,6 +724,7 @@ async def cancel_reservation(payload: CancelReservationRequest):
         {"booking_id": payload.booking_id},
     )
 
+    cancellations_counter.labels(outcome="success").inc()
     return JSONResponse(content={"message": "Reserva cancelada con éxito"}, status_code=200)
 
 @api_router.post("/feedback")
@@ -519,9 +740,30 @@ async def submit_feedback(feedback: FeedbackRequest):
 @api_router.get("/feedback/{property_id}")
 async def get_feedback(property_id: int):
     query = 'SELECT * FROM "Feedback" WHERE id_property = :property_id'
-    feedback_list = [row._asdict() for row in execute_query(query, {"property_id": property_id}).fetchall()]
+    feedback_list = [
+        row_to_serializable_dict(row)
+        for row in execute_query(query, {"property_id": property_id}).fetchall()
+    ]
     return JSONResponse(content={"feedback": feedback_list}, status_code=200)
 
 
-app.include_router(api_router)
+configure_metrics(app)
+
+
+@app.on_event("startup")
+async def on_startup() -> None:
+    update_database_health_metric()
+    app.state.db_monitor_task = asyncio.create_task(monitor_database_health())
+
+
+@app.on_event("shutdown")
+async def on_shutdown() -> None:
+    monitor_task = getattr(app.state, "db_monitor_task", None)
+    if monitor_task:
+        monitor_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await monitor_task
+
+
 app.include_router(api_router, prefix="/api")
+app.include_router(auth_router, prefix="")
